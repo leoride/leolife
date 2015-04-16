@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dgrijalva/jwt-go"
 	"log"
 	"net/http"
 )
@@ -24,5 +25,33 @@ func RestHandlerWrapper(f func(http.ResponseWriter, *http.Request) error) func(h
 			fmt.Fprint(w, string(restErrB))
 		}
 	}
+
+}
+
+func RestAuthHandlerWrapper(f func(http.ResponseWriter, *http.Request) error) func(http.ResponseWriter, *http.Request) {
+
+	f2 := func(w http.ResponseWriter, r *http.Request) error {
+		var err error
+
+		tokenStr := r.Header.Get("auth-token")
+
+		if tokenStr == "" {
+			err = fmt.Errorf("No auth-token found in header")
+		} else {
+			var token *jwt.Token
+			token, err = jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return []byte("leoride_leolife_rox"), nil })
+
+			if (err == nil) && (token.Valid) {
+				err = f(w, r)
+
+			} else {
+				err = fmt.Errorf("invalid token")
+			}
+		}
+
+		return err
+	}
+
+	return RestHandlerWrapper(f2)
 
 }
