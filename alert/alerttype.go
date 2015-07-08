@@ -121,21 +121,65 @@ func insertAlertType(tx *sql.Tx, at *AlertType) error {
 }
 
 //Repository: AlertType
+//Updates an alert type
+func updateAlertType(tx *sql.Tx, at *AlertType) error {
+	var err error = nil
+
+	sqlQ := "UPDATE alert_type set name = $1, description = $2 WHERE id = $3"
+
+	if _, err = tx.Exec(sqlQ, at.Name, at.Description, at.Id); err == nil {
+
+		for idx, atf := range at.Fields {
+			if atf.Id == "" {
+				if err = insertAlertTypeField(tx, &atf, at); err != nil {
+					return err
+				}
+				at.Fields[idx] = atf
+			} else {
+				if err = updateAlertTypeField(tx, &atf, at); err != nil {
+					return err
+				}
+				at.Fields[idx] = atf
+			}
+		}
+
+		//watch for atf to delete
+		if currAtfs, err := getAlertTypeFieldByAlertType(tx, at.Id); err == nil {
+			for _, currAtf := range currAtfs {
+				stillExists := false
+
+				for _, atf := range at.Fields {
+					if currAtf.Id == atf.Id {
+						stillExists = true
+					}
+				}
+
+				if !stillExists {
+					err = deleteAlertTypeField(tx, currAtf.Id)
+				}
+			}
+		}
+	}
+
+	return err
+}
+
+//Repository: AlertType
 //Deletes an alert type
 func deleteAlertType(tx *sql.Tx, uuid string) error {
 	var err error = nil
 	var at *AlertType
 
 	if at, err = getAlertType(tx, uuid); err == nil {
-        if at != nil {
-            for _, atf := range at.Fields {
-                if err = deleteAlertTypeField(tx, atf.Id); err != nil {
-                    break
-                }
-            }
-        } else {
-            err = fmt.Errorf("Resource not found")
-        }
+		if at != nil {
+			for _, atf := range at.Fields {
+				if err = deleteAlertTypeField(tx, atf.Id); err != nil {
+					break
+				}
+			}
+		} else {
+			err = fmt.Errorf("Resource not found")
+		}
 
 		if err == nil {
 			sqlQ := "DELETE FROM alert_type WHERE id = $1"
@@ -195,6 +239,18 @@ func insertAlertTypeField(tx *sql.Tx, atf *AlertTypeField, at *AlertType) error 
 }
 
 //Repository: AlertTypeField
+//Updates an alert type field
+func updateAlertTypeField(tx *sql.Tx, atf *AlertTypeField, at *AlertType) error {
+	var err error = nil
+
+	sqlQ := "UPDATE alert_type_field set alert_type_id = $1, name = $2, label = $3, type = $4, \"default\" = $5, mandatory = $6 where id = $7"
+
+	_, err = tx.Exec(sqlQ, at.Id, atf.Name, atf.Label, atf.Type, atf.Default, atf.Mandatory, atf.Id)
+
+	return err
+}
+
+//Repository: AlertTypeField
 //Deletes an alert type field
 func deleteAlertTypeField(tx *sql.Tx, uuid string) error {
 	var err error = nil
@@ -212,6 +268,7 @@ func ListenForAlertType(r *mux.Router, db *sql.DB) {
 	r.HandleFunc("/alertTypes", util.RestErrorWrapper(alertTypeCreateHandler(db))).Methods("POST")
 	r.HandleFunc("/alertTypes", util.RestErrorWrapper(alertTypesHandler(db))).Methods("GET")
 	r.HandleFunc("/alertType/{id}", util.RestErrorWrapper(alertTypeHandler(db))).Methods("GET")
+	r.HandleFunc("/alertType/{id}", util.RestErrorWrapper(alertTypeUpdateHandler(db))).Methods("PUT")
 	r.HandleFunc("/alertType/{id}", util.RestErrorWrapper(alertTypeDeleteHandler(db))).Methods("DELETE")
 }
 
@@ -333,6 +390,53 @@ func alertTypeHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) *util
 			restErr.Status = 500
 			restErr.DeveloperMessage = err.Error()
 			restErr.Message = "An error has ocured while processing a request to retrieve an alert type by id"
+
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+
+		return restErr
+	}
+}
+
+//Listener: AlertType Handler
+//Handles requests for updating an AlertType by Id
+func alertTypeUpdateHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) *util.RestError {
+	return func(w http.ResponseWriter, r *http.Request) *util.RestError {
+
+		var (
+			restErr   *util.RestError
+			err       error
+			tx        *sql.Tx
+			alertType AlertType
+			jsonB     []byte
+		)
+
+		vars := mux.Vars(r)
+
+		if tx, err = db.Begin(); err == nil {
+			id := vars["id"]
+			if jsonB, err = ioutil.ReadAll(r.Body); err == nil {
+				if err = json.Unmarshal(jsonB, &alertType); err == nil {
+					alertType.Id = id
+					if err = updateAlertType(tx, &alertType); err == nil {
+						if jsonB, err = json.MarshalIndent(alertType, "", "    "); err == nil {
+							w.Header().Set("content-type", "application/json")
+							w.WriteHeader(200)
+							fmt.Fprint(w, string(jsonB))
+						}
+					}
+				}
+			}
+		}
+
+		if err != nil {
+			restErr = new(util.RestError)
+			restErr.Code = 0
+			restErr.Status = 500
+			restErr.DeveloperMessage = err.Error()
+			restErr.Message = "An error has ocured while processing a request to update an alert type by id"
 
 			tx.Rollback()
 		} else {
