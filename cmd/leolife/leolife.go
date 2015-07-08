@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/gorilla/mux"
-	"github.com/leoride/leolife/alert"
+	"github.com/leoride/leolife/alert/alerttype"
 	_ "github.com/lib/pq"
 	"log"
 	"net/http"
@@ -24,7 +24,7 @@ func main() {
 	srV1 := r.PathPrefix("/api/v1/").Subrouter()
 
 	//do stuff
-	alert.ListenForAlertType(srV1, db)
+	alerttype.ListenForAlertType(srV1, db)
 	//done doing stuff
 
 	http.Handle("/", r)
