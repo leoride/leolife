@@ -120,6 +120,32 @@ func insertAlertType(tx *sql.Tx, at *AlertType) error {
 	return err
 }
 
+//Repository: AlertType
+//Deletes an alert type
+func deleteAlertType(tx *sql.Tx, uuid string) error {
+	var err error = nil
+	var at *AlertType
+
+	if at, err = getAlertType(tx, uuid); err == nil {
+        if at != nil {
+            for _, atf := range at.Fields {
+                if err = deleteAlertTypeField(tx, atf.Id); err != nil {
+                    break
+                }
+            }
+        } else {
+            err = fmt.Errorf("Resource not found")
+        }
+
+		if err == nil {
+			sqlQ := "DELETE FROM alert_type WHERE id = $1"
+			_, err = tx.Exec(sqlQ, uuid)
+		}
+	}
+
+	return err
+}
+
 //Repository: AlertTypeField
 //Finds all alert type fields linked to a specific alert type
 func getAlertTypeFieldByAlertType(tx *sql.Tx, id string) ([]AlertTypeField, error) {
@@ -168,12 +194,25 @@ func insertAlertTypeField(tx *sql.Tx, atf *AlertTypeField, at *AlertType) error 
 	return err
 }
 
+//Repository: AlertTypeField
+//Deletes an alert type field
+func deleteAlertTypeField(tx *sql.Tx, uuid string) error {
+	var err error = nil
+
+	sqlQ := "DELETE FROM alert_type_field WHERE id = $1"
+
+	_, err = tx.Exec(sqlQ, uuid)
+
+	return err
+}
+
 //Listener: AlertType
 //Listens to API calls for AlertType resource
 func ListenForAlertType(r *mux.Router, db *sql.DB) {
 	r.HandleFunc("/alertTypes", util.RestErrorWrapper(alertTypeCreateHandler(db))).Methods("POST")
 	r.HandleFunc("/alertTypes", util.RestErrorWrapper(alertTypesHandler(db))).Methods("GET")
 	r.HandleFunc("/alertType/{id}", util.RestErrorWrapper(alertTypeHandler(db))).Methods("GET")
+	r.HandleFunc("/alertType/{id}", util.RestErrorWrapper(alertTypeDeleteHandler(db))).Methods("DELETE")
 }
 
 //Listener: AlertType Create Handler
@@ -294,6 +333,43 @@ func alertTypeHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) *util
 			restErr.Status = 500
 			restErr.DeveloperMessage = err.Error()
 			restErr.Message = "An error has ocured while processing a request to retrieve an alert type by id"
+
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+
+		return restErr
+	}
+}
+
+//Listener: AlertType Handler
+//Handles requests for deleting an AlertType by Id
+func alertTypeDeleteHandler(db *sql.DB) func(http.ResponseWriter, *http.Request) *util.RestError {
+	return func(w http.ResponseWriter, r *http.Request) *util.RestError {
+
+		var (
+			restErr *util.RestError
+			err     error
+			tx      *sql.Tx
+		)
+
+		vars := mux.Vars(r)
+
+		if tx, err = db.Begin(); err == nil {
+			id := vars["id"]
+			if err = deleteAlertType(tx, id); err == nil {
+				w.Header().Set("content-type", "application/json")
+				w.WriteHeader(200)
+			}
+		}
+
+		if err != nil {
+			restErr = new(util.RestError)
+			restErr.Code = 0
+			restErr.Status = 500
+			restErr.DeveloperMessage = err.Error()
+			restErr.Message = "An error has ocured while processing a request to delete an alert type by id"
 
 			tx.Rollback()
 		} else {
